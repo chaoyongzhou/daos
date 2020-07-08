@@ -44,6 +44,9 @@ import (
 	"github.com/daos-stack/daos/src/control/system"
 )
 
+type onStorageReadyFn func() error
+type onReadyFn func(ctx context.Context) error
+
 // IOServerInstance encapsulates control-plane specific configuration
 // and functionality for managed I/O server instances. The distinction
 // between this structure and what's in the ioserver package is that the
@@ -64,6 +67,8 @@ type IOServerInstance struct {
 	ready             atm.Bool
 	startLoop         chan bool // restart loop
 	fsRoot            string
+	onStorageReady    []onStorageReadyFn
+	onReady           []onReadyFn
 
 	sync.RWMutex
 	// these must be protected by a mutex in order to
@@ -113,6 +118,18 @@ func (srv *IOServerInstance) isReady() bool {
 // isMSReplica indicates whether or not this instance is a management service replica.
 func (srv *IOServerInstance) isMSReplica() bool {
 	return srv.hasSuperblock() && srv.getSuperblock().MS
+}
+
+// OnStorageReady adds a list of callbacks to invoke when the instance
+// storage becomes ready.
+func (srv *IOServerInstance) OnStorageReady(fn onStorageReadyFn) {
+	srv.onStorageReady = append(srv.onStorageReady, fn)
+}
+
+// OnReady adds a list of callbacks to invoke when the instance
+// becomes ready.
+func (srv *IOServerInstance) OnReady(fn onReadyFn) {
+	srv.onReady = append(srv.onReady, fn)
 }
 
 // LocalState returns local perspective of the current instance state
@@ -174,7 +191,13 @@ func (srv *IOServerInstance) setRank(ctx context.Context, ready *srvpb.NotifyRea
 		r = *superblock.Rank
 	}
 
-	if !superblock.ValidRank || !superblock.MS {
+	if !superblock.ValidRank {
+		// FIXME DAOS-5656: retain dependency on rank 0
+		if superblock.BootstrapMS {
+			r = system.Rank(0)
+			srv.log.Debugf("marking instance %d as rank 0", srv.Index())
+		}
+
 		resp, err := srv.msClient.Join(ctx, &mgmtpb.JoinReq{
 			Uuid:  superblock.UUID,
 			Rank:  r.Uint32(),
@@ -391,7 +414,7 @@ func (srv *IOServerInstance) newMember() (*system.Member, error) {
 		return nil, err
 	}
 
-	return system.NewMember(rank, sb.UUID, addr, system.MemberStateJoined), nil
+	return system.NewMember(rank, sb.UUID, sb.URI, addr, system.MemberStateJoined), nil
 }
 
 // registerMember creates a new system.Member for given instance and adds it
@@ -404,7 +427,5 @@ func (srv *IOServerInstance) registerMember(membership *system.Membership) error
 		return errors.Wrapf(err, "instance %d: failed to extract member details", idx)
 	}
 
-	membership.AddOrReplace(m)
-
-	return nil
+	return membership.AddOrReplace(m)
 }

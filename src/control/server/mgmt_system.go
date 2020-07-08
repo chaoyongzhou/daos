@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/peer"
 
@@ -82,7 +83,7 @@ func pollInstanceState(ctx context.Context, instances []*IOServerInstance, valid
 }
 
 // getPeerListenAddr combines peer ip from supplied context with input port.
-func getPeerListenAddr(ctx context.Context, listenAddrStr string) (net.Addr, error) {
+func getPeerListenAddr(ctx context.Context, listenAddrStr string) (*net.TCPAddr, error) {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("peer details not found in context")
@@ -102,6 +103,91 @@ func getPeerListenAddr(ctx context.Context, listenAddrStr string) (net.Addr, err
 	// resolve combined IP/port address
 	return net.ResolveTCPAddr(p.Addr.Network(),
 		net.JoinHostPort(tcpAddr.IP.String(), portStr))
+}
+
+const (
+	updateCheckTimeout = 1 * time.Second
+)
+
+func (svc *mgmtSvc) groupUpdateLoop(ctx context.Context) {
+	var updateRequested bool
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(updateCheckTimeout):
+			if !updateRequested {
+				continue
+			}
+			svc.log.Debug("starting group update")
+			if err := svc.doGroupUpdate(ctx); err != nil {
+				svc.log.Error(errors.Wrap(err, "group update failed").Error())
+				if err == system.ErrEmptyGroupMap {
+					updateRequested = false
+				}
+				continue
+			}
+			svc.log.Debug("finished group update")
+			updateRequested = false
+		case <-svc.updateReqChan:
+			svc.log.Debug("received group update request")
+			updateRequested = true
+		}
+	}
+}
+
+func (svc *mgmtSvc) startUpdateLoop(ctx context.Context) {
+	go svc.groupUpdateLoop(ctx)
+}
+
+func (svc *mgmtSvc) requestGroupUpdate(ctx context.Context) {
+	go func(ctx context.Context) {
+		select {
+		case <-ctx.Done():
+		case svc.updateReqChan <- struct{}{}:
+			svc.log.Debug("requested group update")
+		}
+	}(ctx)
+}
+
+func (svc *mgmtSvc) doGroupUpdate(ctx context.Context) error {
+	gm, err := svc.sysdb.GroupMap()
+	if err != nil {
+		return err
+	}
+	if len(gm.RankURIs) == 0 {
+		return system.ErrEmptyGroupMap
+	}
+	req := &mgmtpb.GroupUpdateReq{
+		MapVersion: gm.Version,
+	}
+	rankSet := &system.RankSet{}
+	for rank, uri := range gm.RankURIs {
+		req.Servers = append(req.Servers, &mgmtpb.GroupUpdateReq_Server{
+			Rank: rank.Uint32(),
+			Uri:  uri,
+		})
+		if err := rankSet.Add(rank); err != nil {
+			return errors.Wrap(err, "adding rank to set")
+		}
+	}
+
+	svc.log.Debugf("group update request: version: %d, ranks: %s", req.MapVersion, rankSet)
+	dResp, err := svc.harness.CallDrpc(ctx, drpc.MethodGroupUpdate, req)
+	if err != nil {
+		svc.log.Errorf("dRPC GroupUpdate call failed: %s", err)
+		return err
+	}
+
+	resp := new(mgmtpb.GroupUpdateResp)
+	if err = proto.Unmarshal(dResp.Body, resp); err != nil {
+		return errors.Wrap(err, "unmarshal GroupUpdate response")
+	}
+
+	if resp.GetStatus() != 0 {
+		return drpc.DaosStatus(resp.GetStatus())
+	}
+	return nil
 }
 
 // Join management service gRPC handler receives Join requests from
@@ -124,28 +210,41 @@ func (svc *mgmtSvc) Join(ctx context.Context, req *mgmtpb.JoinReq) (*mgmtpb.Join
 			"combining peer addr with listener port")
 	}
 
-	dresp, err := svc.harness.CallDrpc(ctx, drpc.MethodJoin, req)
+	uuid, err := uuid.Parse(req.GetUuid())
+	if err != nil {
+		return nil, errors.Wrapf(err, "invalid uuid %q", req.GetUuid())
+	}
+
+	joinResponse, err := svc.membership.Join(&system.JoinRequest{
+		Rank:           system.Rank(req.Rank),
+		UUID:           uuid,
+		ControlAddr:    replyAddr,
+		FabricURI:      req.GetUri(),
+		FabricContexts: req.GetNctxs(),
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	resp := &mgmtpb.JoinResp{}
-	if err = proto.Unmarshal(dresp.Body, resp); err != nil {
-		return nil, errors.Wrap(err, "unmarshal Join response")
-	}
-
-	// if join response indicates success, update membership
-	if resp.GetStatus() == 0 {
-		newState := system.MemberStateEvicted
-		if resp.GetState() == mgmtpb.JoinResp_IN {
-			newState = system.MemberStateJoined
+	member := joinResponse.Member
+	if joinResponse.Created {
+		svc.log.Debugf("new system member: rank %d, addr %s, uri %s",
+			member.Rank, replyAddr, member.FabricURI)
+	} else {
+		svc.log.Debugf("updated system member: rank %d, uri %s, %s->%s",
+			member.Rank, member.FabricURI, joinResponse.PrevState, member.State())
+		if joinResponse.PrevState == member.State() {
+			svc.log.Errorf("unexpected same state in rank %d update (%s->%s)",
+				member.Rank, joinResponse.PrevState, member.State())
 		}
-
-		svc.membership.AddOrReplace(system.NewMember(
-			system.Rank(resp.GetRank()), req.GetUuid(), replyAddr, newState))
 	}
 
-	return resp, nil
+	svc.requestGroupUpdate(ctx)
+	svc.log.Debugf("requested group update after rank %d joined", member.Rank)
+
+	return &mgmtpb.JoinResp{
+		State: mgmtpb.JoinResp_IN,
+		Rank:  member.Rank.Uint32(),
+	}, nil
 }
 
 // drpcOnLocalRanks iterates over local instances issuing dRPC requests in
@@ -414,7 +513,12 @@ func (svc *mgmtSvc) StartRanks(ctx context.Context, req *mgmtpb.RanksReq) (*mgmt
 		if srv.isStarted() {
 			continue
 		}
-		srv.startLoop <- true
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case srv.startLoop <- true:
+			continue
+		}
 	}
 
 	// ignore poll results as we gather state immediately after

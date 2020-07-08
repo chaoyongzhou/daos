@@ -144,6 +144,7 @@ func (m mgmtMethod) String() string {
 		MethodPingRank:        "Ping",
 		MethodSetRank:         "SetRank",
 		MethodSetUp:           "SetUp",
+		MethodGroupUpdate:     "GroupUpdate",
 		MethodPoolCreate:      "PoolCreate",
 		MethodPoolDestroy:     "PoolDestroy",
 		MethodPoolEvict:       "PoolEvict",
@@ -231,6 +232,8 @@ const (
 	MethodPoolSetProp mgmtMethod = C.DRPC_METHOD_MGMT_POOL_SET_PROP
 	// MethodContSetOwner defines a method for setting the container's owner
 	MethodContSetOwner mgmtMethod = C.DRPC_METHOD_MGMT_CONT_SET_OWNER
+	// MethodGroupUpdate defines a method for updating the group map
+	MethodGroupUpdate mgmtMethod = C.DRPC_METHOD_MGMT_GROUP_UPDATE
 )
 
 type srvMethod int32
@@ -270,6 +273,8 @@ const (
 	MethodNotifyReady srvMethod = C.DRPC_METHOD_SRV_NOTIFY_READY
 	// MethodBIOError is a ModuleSrv method
 	MethodBIOError srvMethod = C.DRPC_METHOD_SRV_BIO_ERR
+	// MethodGetPoolServiceRanks requests the service ranks for a pool
+	MethodGetPoolServiceRanks srvMethod = C.DRPC_METHOD_SRV_GET_POOL_SVC
 )
 
 type securityMethod int32
