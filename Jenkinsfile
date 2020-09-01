@@ -1146,7 +1146,7 @@ pipeline {
                         expression { ! skip_ftest('leap15') }
                     }
                     agent {
-                        label 'ci_vm9'
+                        label 'stage_vm9'
                     }
                     steps {
                         functionalTest inst_repos: daos_repos(),
@@ -1183,7 +1183,7 @@ pipeline {
                     }
                     agent {
                         // 2 node cluster with 1 IB/node + 1 test control node
-                        label 'ci_nvme3'
+                        label 'stage_nvme3'
                     }
                     steps {
                         functionalTest target: hw_distro_target(),
