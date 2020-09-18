@@ -302,7 +302,7 @@ pool_iv_conn_lookup(struct pool_iv_conns *conns, uuid_t uuid)
 	struct pool_iv_conn	*conn = conns->pic_conns;
 	char			*end = (char *)conn + conns->pic_size;
 
-	while ((char *)conn < end) {
+	while (conn->pic_creds <= end) {
 		if (uuid_compare(conn->pic_hdl, uuid) == 0)
 			return conn;
 		conn = pool_iv_conn_next(conn);
@@ -314,8 +314,7 @@ pool_iv_conn_lookup(struct pool_iv_conns *conns, uuid_t uuid)
 static int
 pool_iv_conn_delete(struct pool_iv_conns *conns, uuid_t hdl_uuid)
 {
-	struct pool_iv_conn	*conn;
-	char			*next;
+	struct pool_iv_conn	*conn, *next;
 	char			*end;
 	size_t			size;
 
@@ -327,11 +326,12 @@ pool_iv_conn_delete(struct pool_iv_conns *conns, uuid_t hdl_uuid)
 		pool_iv_conn_size(conn->pic_cred_size));
 
 	size = pool_iv_conn_size(conn->pic_cred_size);
+	D_ASSERT(conns->pic_size >= size);
 	end = (char *)conns->pic_conns + conns->pic_size;
-	next = (char *)pool_iv_conn_next(conn);
-	if (end != next)
+	next = pool_iv_conn_next(conn);
+	if (next->pic_creds <= end)
 		memmove((char *)conn, (char *)next,
-			(unsigned long)(end - next));
+			(unsigned long)(end - (char *)next));
 	conns->pic_size -= size;
 
 	return 0;
@@ -371,10 +371,11 @@ pool_iv_conns_resize(d_sg_list_t *sgl, unsigned int new_size)
 	if (new_conns == NULL)
 		return -DER_NOMEM;
 
+	D_ASSERT(new_size >= sizeof(*new_conns));
 	new_conns->pic_buf_size = new_size - sizeof(*new_conns);
 	sgl->sg_iovs[0].iov_buf = new_conns;
 	sgl->sg_iovs[0].iov_buf_len = new_size;
-	return 0; 
+	return 0;
 }
 
 static int
@@ -481,7 +482,7 @@ pool_iv_ent_copy(struct ds_iv_key *key, d_sg_list_t *dst, d_sg_list_t *src)
 			if (rc) {
 				if (rc == -DER_REC2BIG)
 					pik->pik_entry_size =
-						sizeof(*src_conns) + 
+						sizeof(*src_conns) +
 						src_conns->pic_size +
 						dst_conns->pic_size;
 				D_GOTO(out, rc);
@@ -491,12 +492,12 @@ pool_iv_ent_copy(struct ds_iv_key *key, d_sg_list_t *dst, d_sg_list_t *src)
 
 			conn = src_conns->pic_conns;
 			end = (char *)conn + src_conns->pic_size;
-			while ((char *)conn < end) {
+			while (conn->pic_creds <= end) {
 				rc = pool_iv_conn_insert(dst_conns, conn);
 				if (rc) {
 					if (rc == -DER_REC2BIG)
 						pik->pik_entry_size =
-							sizeof(*src_conns) + 
+							sizeof(*src_conns) +
 							src_conns->pic_size +
 							dst_conns->pic_size;
 					D_GOTO(out, rc);
@@ -730,7 +731,7 @@ retry:
 
 		conn = src_iv->piv_conn_hdls.pic_conns;
 		end = (char *)conn + src_iv->piv_conn_hdls.pic_size;
-		while ((char *)conn < end) {
+		while (conn->pic_creds <= end) {
 			rc = ds_pool_tgt_connect(pool, conn);
 			if (rc)
 				D_GOTO(out_put, rc);
