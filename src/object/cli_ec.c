@@ -1329,8 +1329,9 @@ obj_ec_singv_split(daos_obj_id_t oid, uint32_t shard, daos_size_t iod_size,
 	uint32_t shard_idx = shard % obj_ec_data_tgt_nr(oca);
 	char	*data = sgl->sg_iovs[0].iov_buf;
 
+	D_ASSERT(iod_size != DAOS_REC_ANY);
 	if (shard_idx > 0)
-		memmove(data, data + shard_idx *c_bytes, c_bytes);
+		memmove(data, data + shard_idx * c_bytes, c_bytes);
 
 	sgl->sg_iovs[0].iov_len = c_bytes;
 

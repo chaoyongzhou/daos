@@ -689,6 +689,7 @@ migrate_update_parity(struct migrate_one *mrone, struct ds_cont_child *ds_cont,
 
 			D_ASSERT(shard >= obj_ec_data_tgt_nr(oca));
 			shard -= obj_ec_data_tgt_nr(oca);
+			D_ASSERT(shard < obj_ec_parity_tgt_nr(oca));
 			rc = obj_ec_encode_buf(mrone->mo_oid.id_pub,
 					       oca, iod->iod_size, buffer,
 					       p_bufs);
@@ -832,6 +833,7 @@ migrate_fetch_update_single(struct migrate_one *mrone, daos_handle_t oh,
 		D_ASSERT(mrone->mo_iods[i].iod_type == DAOS_IOD_SINGLE);
 
 		size = daos_iods_len(&mrone->mo_iods[i], 1);
+		D_ASSERT(size != -1);
 		D_ALLOC(data, size);
 		if (data == NULL)
 			D_GOTO(out, rc =-DER_NOMEM);
@@ -1724,9 +1726,6 @@ migrate_one_epoch_object(daos_handle_t oh, daos_epoch_range_t *epr,
 	memset(&anchor, 0, sizeof(anchor));
 	memset(&dkey_anchor, 0, sizeof(dkey_anchor));
 	memset(&akey_anchor, 0, sizeof(akey_anchor));
-	dc_obj_shard2anchor(&dkey_anchor, arg->shard);
-	daos_anchor_set_flags(&dkey_anchor, DIOF_TO_LEADER |
-					    DIOF_WITH_SPEC_EPOCH);
 	unpack_arg.arg = arg;
 	unpack_arg.epr = *epr;
 	D_INIT_LIST_HEAD(&unpack_arg.merge_list);
@@ -1748,12 +1747,15 @@ migrate_one_epoch_object(daos_handle_t oh, daos_epoch_range_t *epr,
 		csum.iov_len = 0;
 
 		num = KDS_NUM;
+		daos_anchor_set_flags(&dkey_anchor,
+				      DIOF_TO_LEADER | DIOF_WITH_SPEC_EPOCH);
+retry:
 		rc = dsc_obj_list_obj(oh, epr, NULL, NULL, &size,
 				     &num, kds, &sgl, &anchor,
 				     &dkey_anchor, &akey_anchor, &csum);
 
 		if (rc == -DER_KEY2BIG) {
-			D_DEBUG(DB_TRACE, "migrate obj "DF_UOID" got "
+			D_DEBUG(DB_REBUILD, "migrate obj "DF_UOID" got "
 				"-DER_KEY2BIG, key_len "DF_U64"\n",
 				DP_UOID(arg->oid), kds[0].kd_key_len);
 			buf_len = roundup(kds[0].kd_key_len * 2, 8);
@@ -1767,9 +1769,8 @@ migrate_one_epoch_object(daos_handle_t oh, daos_epoch_range_t *epr,
 			continue;
 		} else if (rc == -DER_TRUNC &&
 			   csum.iov_len > csum.iov_buf_len) {
-			D_DEBUG(DB_TRACE, "migrate obj csum buf "
-					  "not large enough. Increase and try "
-					  "again");
+			D_DEBUG(DB_REBUILD, "migrate obj csum buf "
+				"not large enough. Increase and try again");
 			if (csum.iov_buf != stack_csum_buf)
 				D_FREE(csum.iov_buf);
 
@@ -1781,6 +1782,14 @@ migrate_one_epoch_object(daos_handle_t oh, daos_epoch_range_t *epr,
 				break;
 			}
 			continue;
+		} else if (rc == -DER_NOTAPPLICABLE &&
+			   daos_anchor_get_flags(&dkey_anchor) &
+						 DIOF_TO_LEADER) {
+			daos_anchor_set_flags(&dkey_anchor,
+					      DIOF_WITH_SPEC_EPOCH);
+			D_DEBUG(DB_REBUILD, "retry list "DF_UOID"\n",
+				DP_UOID(arg->oid));
+			D_GOTO(retry, rc);
 		} else if (rc) {
 			/* container might have been destroyed. Or there is
 			 * no spare target left for this object see
