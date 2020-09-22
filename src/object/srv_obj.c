@@ -3473,10 +3473,23 @@ ds_obj_dtx_handle_one(crt_rpc_t *rpc, struct daos_cpd_sub_head *dcsh,
 			if (rc != 0)
 				goto out;
 
-			rc = vos_obj_punch(ioc->ioc_coc->sc_hdl, dcsr->dcsr_oid,
-				dcsh->dcsh_epoch.oe_value, dth->dth_ver,
-				dcsr->dcsr_api_flags, &dcsr->dcsr_dkey,
-				dcsr->dcsr_nr, dcsr->dcsr_punch.dcp_akeys, dth);
+			if (dcsr->dcsr_opc == DCSO_PUNCH_OBJ)
+				rc = vos_obj_punch(ioc->ioc_coc->sc_hdl,
+						   dcsr->dcsr_oid,
+						   dcsh->dcsh_epoch.oe_value,
+						   dth->dth_ver,
+						   dcsr->dcsr_api_flags, NULL,
+						   0, NULL, dth);
+			else
+				rc = vos_obj_punch(ioc->ioc_coc->sc_hdl,
+						   dcsr->dcsr_oid,
+						   dcsh->dcsh_epoch.oe_value,
+						   dth->dth_ver,
+						   dcsr->dcsr_api_flags,
+						   &dcsr->dcsr_dkey,
+						   dcsr->dcsr_nr,
+						   dcsr->dcsr_punch.dcp_akeys,
+						   dth);
 			if (rc != 0)
 				goto out;
 		}
