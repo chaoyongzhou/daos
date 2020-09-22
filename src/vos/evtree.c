@@ -990,7 +990,7 @@ evt_tcx_create(struct evt_root *root, uint64_t feats, unsigned int order,
 
 	D_ASSERT(root != NULL);
 
-	D_ALLOC_PTR(tcx);
+	tcx = d_mm_alloc(sizeof(*tcx));
 	if (tcx == NULL)
 		return -DER_NOMEM;
 

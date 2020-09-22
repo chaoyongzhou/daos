@@ -747,13 +747,14 @@ crt_rpc_handler_common(hg_handle_t hg_hdl)
 	}
 	D_ASSERT(opc_info->coi_opc == opc);
 
-	D_ALLOC(rpc_priv, opc_info->coi_rpc_size);
+	rpc_priv = d_mm_alloc(opc_info->coi_rpc_size);
 	if (rpc_priv == NULL) {
 		crt_hg_reply_error_send(&rpc_tmp, -DER_DOS);
 		crt_hg_unpack_cleanup(proc);
 		HG_Destroy(rpc_tmp.crp_hg_hdl);
 		D_GOTO(out, hg_ret = HG_SUCCESS);
 	}
+	memset(rpc_priv, 0, opc_info->coi_rpc_size);
 	crt_hg_header_copy(&rpc_tmp, rpc_priv);
 	rpc_pub = &rpc_priv->crp_pub;
 

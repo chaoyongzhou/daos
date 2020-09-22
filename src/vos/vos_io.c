@@ -451,7 +451,7 @@ vos_ioc_destroy(struct vos_io_context *ioc, bool evict)
 	vos_ilog_fetch_finish(&ioc->ic_akey_info);
 	vos_cont_decref(ioc->ic_cont);
 	vos_ts_set_free(ioc->ic_ts_set);
-	D_FREE(ioc);
+	d_mm_free(ioc);
 }
 
 static int
@@ -476,7 +476,7 @@ vos_ioc_create(daos_handle_t coh, daos_unit_oid_t oid, bool read_only,
 		goto error;
 	}
 
-	D_ALLOC_PTR(ioc);
+	ioc = d_mm_alloc(sizeof(*ioc));
 	if (ioc == NULL)
 		return -DER_NOMEM;
 
@@ -1496,7 +1496,7 @@ dkey_update(struct vos_io_context *ioc, uint32_t pm_ver, daos_key_t *dkey,
 	    uint16_t minor_epc)
 {
 	struct vos_object	*obj = ioc->ic_obj;
-	daos_handle_t		 ak_toh;
+	daos_handle_t		 ak_toh = DAOS_HDL_INVAL;
 	struct vos_krec_df	*krec;
 	uint32_t		 update_cond = 0;
 	bool			 subtr_created = false;
@@ -1554,7 +1554,8 @@ out:
 		goto release;
 
 release:
-	key_tree_release(ak_toh, false);
+	if (!daos_handle_is_inval(ak_toh))
+		key_tree_release(ak_toh, false);
 
 	return rc;
 }

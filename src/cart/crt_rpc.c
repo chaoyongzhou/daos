@@ -246,7 +246,8 @@ crt_rpc_priv_alloc(crt_opcode_t opc, struct crt_rpc_priv **priv_allocated,
 {
 	struct crt_rpc_priv	*rpc_priv;
 	struct crt_opc_info	*opc_info;
-	int			rc = 0;
+	size_t			 size;
+	int			 rc = 0;
 
 	D_ASSERT(priv_allocated != NULL);
 
@@ -265,12 +266,12 @@ crt_rpc_priv_alloc(crt_opcode_t opc, struct crt_rpc_priv **priv_allocated,
 		D_GOTO(out, rc = -DER_INVAL);
 	}
 
-	if (forward)
-		D_ALLOC(rpc_priv, opc_info->coi_input_offset);
-	else
-		D_ALLOC(rpc_priv, opc_info->coi_rpc_size);
+	size = forward ? opc_info->coi_input_offset : opc_info->coi_rpc_size;
+
+	rpc_priv = d_mm_alloc(size);
 	if (rpc_priv == NULL)
 		D_GOTO(out, rc = -DER_NOMEM);
+	memset(rpc_priv, 0, size);
 
 	rpc_priv->crp_opc_info = opc_info;
 	rpc_priv->crp_forward = forward;
@@ -299,7 +300,7 @@ crt_rpc_priv_free(struct crt_rpc_priv *rpc_priv)
 
 	D_SPIN_DESTROY(&rpc_priv->crp_lock);
 
-	D_FREE(rpc_priv);
+	d_mm_free(rpc_priv);
 }
 
 static inline void

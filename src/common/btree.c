@@ -253,7 +253,7 @@ btr_context_decref(struct btr_context *tcx)
 	D_ASSERT(tcx->tc_ref > 0);
 	tcx->tc_ref--;
 	if (tcx->tc_ref == 0)
-		D_FREE(tcx);
+		d_mm_free(tcx);
 }
 
 static void
@@ -292,7 +292,7 @@ btr_context_create(umem_off_t root_off, struct btr_root *root,
 	unsigned int		 depth;
 	int			 rc;
 
-	D_ALLOC_PTR(tcx);
+	tcx = d_mm_alloc(sizeof(*tcx));
 	if (tcx == NULL)
 		return -DER_NOMEM;
 
@@ -304,6 +304,8 @@ btr_context_create(umem_off_t root_off, struct btr_root *root,
 			DP_RC(rc));
 		D_GOTO(failed, rc);
 	}
+
+	tcx->tc_itr.it_state = BTR_ITR_NONE;
 
 	root = tcx->tc_tins.ti_root;
 	if (root == NULL || root->tr_class == 0) { /* tree creation */
@@ -3004,7 +3006,6 @@ dbtree_create(unsigned int tree_class, uint64_t tree_feats,
 		return rc;
 
 	rc = btr_tx_tree_alloc(tcx);
-
 	if (rc != 0)
 		goto failed;
 
@@ -3076,7 +3077,6 @@ dbtree_create_inplace_ex(unsigned int tree_class, uint64_t tree_feats,
 		return rc;
 
 	rc = btr_tx_tree_init(tcx, root);
-
 	if (rc != 0)
 		goto failed;
 

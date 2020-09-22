@@ -315,6 +315,11 @@ void d_getenv_int(const char *env, unsigned int *int_val);
 int d_write_string_buffer(struct d_string_buffer_t *buf, const char *fmt, ...);
 void d_free_string(struct d_string_buffer_t *buf);
 
+int   d_mm_init(size_t n);
+void  d_mm_fini(void);
+void *d_mm_alloc(size_t size);
+void  d_mm_free(void *buff);
+void  d_mm_flush(void);
 
 #if !defined(container_of)
 /* given a pointer @ptr to the field @member embedded into type (usually
