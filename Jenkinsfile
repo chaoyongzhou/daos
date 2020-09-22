@@ -270,6 +270,10 @@ def getuid() {
     return cached_uid
 }
 
+String rpm_test_version() {
+    return cachedCommitPragma(pragma: 'RPM-test-version')
+}
+
 boolean skip_prebuild() {
     return target_branch == 'weekly-testing'
 }
@@ -285,7 +289,7 @@ boolean skip_build() {
     return (env.BRANCH_NAME != target_branch) &&
            skip_stage('build') ||
            doc_only_change() ||
-           cachedCommitPragma(pragma: 'RPM-test-version', cache: commit_pragma_cache) != ''
+           rpm_test_version() != ''
 }
 
 boolean skip_build_rpm(String distro) {
@@ -361,10 +365,10 @@ boolean skip_build_on_leap15_icc() {
 
 boolean skip_testing_stage() {
     return  env.NO_CI_TESTING == 'true' ||
-            skip_stage('build') ||
+            (skip_stage('build') &&
+             rpm_test_version() == '') ||
             doc_only_change() ||
-            skip_stage('test') ||
-            cachedCommitPragma(pragma: 'RPM-test-version') != ''
+            skip_stage('test')
 }
 
 boolean skip_unit_test() {
