@@ -368,6 +368,9 @@ class DaosServer():
         self.conf.agent_dir = self.agent_dir
         self.running = True
 
+        # Hack: Give the servers time to start before querying
+        time.sleep(20)
+
         # Use dmg to block until the server is ready to respond to requests.
         start = time.time()
         while True:
@@ -377,7 +380,7 @@ class DaosServer():
             if rc.returncode == 0:
                 for line in rc.stdout.decode('utf-8').splitlines():
                     if line.startswith('status'):
-                        if 'Ready' in line:
+                        if 'Ready' in line or 'Joined' in line:
                             ready = True
 
             if ready:
