@@ -59,6 +59,10 @@ post_provision_config_nodes() {
 
     zypper --non-interactive in lsb-release
 
+    # force install of avocado 52.1
+    zypper --non-interactive remove avocado{,-common} python2-avocado{,-plugins-{output-html,varianter-yaml-to-mux}}
+    zypper --non-interactive install {avocado-common,python2-avocado{,-plugins-{output-html,varianter-yaml-to-mux}}}-52.1
+
     # shellcheck disable=SC2086
     if [ -n "$INST_RPMS" ] && \
        ! zypper --non-interactive in $INST_RPMS; then
